@@ -1,0 +1,48 @@
+---
+import Base from '../../layouts/Base.astro';
+import { getCollection, render } from 'astro:content';
+import { formatDate, slugOf } from '../../lib/notes';
+
+const all = (await getCollection('reports'))
+  .filter((r) => !r.data.draft)
+  .sort((a, b) => b.data.pubDate.valueOf() - a.data.pubDate.valueOf());
+
+const latest = all[0];
+const { Content } = latest ? await render(latest) : ({} as any);
+const earlier = all.slice(1, 15);
+---
+
+<Base title="Morning report" description="The daily numbers: book, blog, newsletter." page="report">
+  <article class="wrap article">
+    {latest ? (
+      <>
+        <div class="article-meta">
+          <span>{formatDate(latest.data.pubDate)}</span>
+          <span class="sep">·</span>
+          <span class="cat-pill">Daily report</span>
+        </div>
+        <h1 class="article-title">{latest.data.title}</h1>
+        {latest.data.summary && <p class="dek">{latest.data.summary}</p>}
+        <div class="prose"><Content /></div>
+      </>
+    ) : (
+      <p class="empty">No report yet.</p>
+    )}
+
+    {earlier.length > 0 && (
+      <section class="report-earlier">
+        <h2>Earlier</h2>
+        <ul>
+          {earlier.map((r) => (
+            <li>
+              <a href={`/report/${slugOf(r)}/`}>
+                <span class="report-date">{formatDate(r.data.pubDate)}</span>
+                <span>{r.data.title}</span>
+              </a>
+            </li>
+          ))}
+        </ul>
+      </section>
+    )}
+  </article>
+</Base>

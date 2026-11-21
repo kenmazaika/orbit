@@ -1,0 +1,72 @@
+---
+import Base from '../../layouts/Base.astro';
+---
+<Base title="Artifacts" page="plain">
+  <div class="awrap">
+    <div class="ahead">
+      <h1>Artifacts</h1>
+      <p>Drafts you can read, review, and revise. Feedback starts a revision; close one when it ships.</p>
+    </div>
+    <div class="atabs" role="tablist">
+      <button type="button" data-filter="open" class="on" aria-pressed="true">Open</button>
+      <button type="button" data-filter="closed" aria-pressed="false">Closed</button>
+    </div>
+    <div id="alist" class="alist"><p class="aempty">Loading…</p></div>
+  </div>
+  <script is:inline>
+    const API='/api/lab/artifact';
+    let FILTER='open', ROWS=[];
+    const $=(s)=>document.querySelector(s);
+    const esc=(s)=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    async function load(){
+      const res=await fetch(API+'/list');
+      if(res.status===401){location.href='/';return;}
+      const d=await res.json();
+      ROWS=d.artifacts||[]; render();
+    }
+    function render(){
+      const list=$('#alist');
+      const rows=ROWS.filter(a=>FILTER==='open'?!a.closed_at:!!a.closed_at);
+      if(!rows.length){list.innerHTML=`<p class="aempty">No ${FILTER} artifacts.</p>`;return;}
+      list.innerHTML=rows.map(a=>`
+        <article class="acard" data-id="${esc(a.id)}">
+          <a class="amain" href="/artifacts/${encodeURIComponent(a.id)}/">
+            <span class="atitle">${esc(a.title)}</span>
+            <span class="ameta"><span class="achip">V${a.current_number||1}</span>
+              <span>${a.updated_at?new Date(a.updated_at).toLocaleDateString(undefined,{month:'short',day:'numeric'}):''}</span></span>
+          </a>
+          <button class="aclose" type="button">${a.closed_at?'Reopen':'Close'}</button>
+        </article>`).join('');
+      list.querySelectorAll('.aclose').forEach(b=>b.onclick=async(e)=>{
+        e.preventDefault(); e.stopPropagation();
+        const card=b.closest('.acard'); const id=card.dataset.id;
+        const row=ROWS.find(x=>x.id===id); const closed=!row.closed_at;
+        await fetch(API+'/close',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({articleId:id,closed})});
+        row.closed_at=closed?new Date().toISOString():null; render();
+      });
+    }
+    document.querySelectorAll('.atabs button').forEach(b=>b.onclick=()=>{
+      FILTER=b.dataset.filter;
+      document.querySelectorAll('.atabs button').forEach(x=>{x.classList.toggle('on',x===b);x.setAttribute('aria-pressed',x===b);});
+      render();
+    });
+    load();
+  </script>
+  <style is:inline>
+    .awrap{max-width:760px;margin:0 auto;padding:26px 16px 90px}
+    .ahead h1{font-family:'Literata',Georgia,serif;font-size:2rem;margin:0 0 6px;letter-spacing:-.02em}
+    .ahead p{color:#6f6878;font-size:.88rem;margin:0 0 18px}
+    .atabs{display:flex;gap:6px;margin-bottom:14px}
+    .atabs button{border:1px solid #e8e1dc;background:#fff;border-radius:999px;padding:6px 12px;font:inherit;font-size:.78rem;color:#6f6878;cursor:pointer}
+    .atabs button.on{background:#f3eefc;border-color:#d8ccef;color:#6D35C5;font-weight:600}
+    .alist{display:flex;flex-direction:column;gap:10px}
+    .acard{display:flex;align-items:center;gap:8px;border:1px solid #e8e1dc;background:#fff;border-radius:12px;padding:10px 12px}
+    .amain{flex:1;min-width:0;text-decoration:none;color:inherit;display:flex;flex-direction:column;gap:5px}
+    .atitle{font-family:'Literata',Georgia,serif;font-size:1.02rem;line-height:1.25;overflow:hidden;text-overflow:ellipsis}
+    .ameta{display:flex;align-items:center;gap:8px;color:#8b8394;font-size:.72rem}
+    .achip{border:1px solid #e2d8f3;background:#f7f3fe;color:#6D35C5;border-radius:999px;padding:2px 7px;font-size:.66rem;font-weight:600}
+    .aclose{border:1px solid #e8e1dc;background:#fff;border-radius:9px;padding:6px 9px;font:inherit;font-size:.72rem;color:#6f6878;cursor:pointer}
+    .aclose:hover{border-color:#d8ccef;color:#6D35C5}
+    .aempty{color:#8b8394;font-size:.86rem}
+  </style>
+</Base>

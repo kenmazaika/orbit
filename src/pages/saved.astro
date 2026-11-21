@@ -1,0 +1,38 @@
+---
+import Base from '../layouts/Base.astro';
+---
+
+<Base title="Saved" page="saved">
+  <div class="wrap">
+    <section class="intro compact">
+      <h1>Saved</h1>
+      <p class="intro-sub">Kept for later, on this device.</p>
+    </section>
+    <div class="feed" id="saved-list"><p class="empty">Loading…</p></div>
+  </div>
+
+  <script is:inline>
+    (async () => {
+      const host = document.getElementById('saved-list');
+      const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+      try {
+        const saved = new Set(JSON.parse(localStorage.getItem('orbit:saved') || '[]'));
+        const notes = await (await fetch('/notes.json')).json();
+        const list = notes.filter((n) => saved.has(n.slug));
+        if (!list.length) {
+          host.innerHTML = '<p class="empty">Nothing saved yet. Open a note and choose <em>Save for later</em>.</p>';
+          return;
+        }
+        host.innerHTML = list.map((n) => `
+          <a class="feed-item" href="/notes/${esc(n.slug)}/">
+            <div class="feed-meta"><span>${esc(n.date)} <span class="sep">·</span> ${esc(n.category)}</span></div>
+            <h2 class="feed-title">${esc(n.title)}</h2>
+            <p class="feed-excerpt">${esc(n.excerpt)}</p>
+            <span class="read-time">${n.minutes} min read</span>
+          </a>`).join('');
+      } catch {
+        host.innerHTML = '<p class="empty">Could not load saved notes on this device.</p>';
+      }
+    })();
+  </script>
+</Base>

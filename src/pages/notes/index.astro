@@ -1,0 +1,11 @@
+---
+import Base from '../../layouts/Base.astro';
+---
+
+<Base title="Dispatch" page="article">
+  <article class="wrap article" data-dispatch-detail>
+    <a class="back" href="/"><span aria-hidden="true">←</span> Back to Orbit</a>
+    <div data-dispatch-article><p class="empty">Loading dispatch…</p></div>
+  </article>
+  <script is:inline src="/dispatch-shell.js" defer></script>
+</Base>

@@ -1,0 +1,27 @@
+{
+  "name": "orbit",
+  "main": "worker/react-prod.js",
+  "compatibility_date": "2026-11-08",
+  "workers_dev": true,
+  "observability": {
+    "enabled": true
+  },
+  "d1_databases": [
+    {
+      "binding": "ORBIT_OBJECTS_DB",
+      "database_name": "orbit",
+      "database_id": "00000000-0000-0000-0000-000000000000"
+    },
+    {
+      "binding": "ORBIT_INBOX_DB",
+      "database_name": "orbit",
+      "database_id": "00000000-0000-0000-0000-000000000000"
+    }
+  ],
+  "vars": {
+    "ORBIT_ENV": "production-react",
+    "ORBIT_ARTIFACT_POC_ENABLED": "false",
+    "ORBIT_STORAGE_ARTIFACTS": "objects",
+    "ORBIT_STORAGE_INBOX": "objects"
+  }
+}

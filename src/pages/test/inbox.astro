@@ -1,0 +1,77 @@
+---
+import Base from '../../layouts/Base.astro';
+const built = new Date().toISOString();
+---
+
+<Base title="Inbox test" page="plain">
+  <div class="wrap">
+    <section class="intro compact">
+      <h1>Inbox test</h1>
+      <p class="intro-sub">Submit this form and a file should appear in the agent's inbox within ~10 seconds.</p>
+    </section>
+
+    <article class="plain-prose">
+      <form id="orbit-test-form">
+        <fieldset style="border:1px solid #E7DDD5; border-radius:12px; padding:16px 18px; margin:0 0 18px;">
+          <legend style="padding:0 6px; font-size:.8rem; letter-spacing:.08em; text-transform:uppercase;">Checkboxes</legend>
+          <label style="display:flex; gap:10px; align-items:center; margin:.55rem 0;">
+            <input type="checkbox" name="a" /> Checkbox A
+          </label>
+          <label style="display:flex; gap:10px; align-items:center; margin:.55rem 0;">
+            <input type="checkbox" name="b" /> Checkbox B
+          </label>
+          <label style="display:flex; gap:10px; align-items:center; margin:.55rem 0;">
+            <input type="checkbox" name="c" /> Checkbox C
+          </label>
+        </fieldset>
+
+        <label for="text" style="display:block; font-size:.8rem; letter-spacing:.08em; text-transform:uppercase; margin-bottom:8px;">Text</label>
+        <input id="text" name="text" type="text" placeholder="Enter text here" autocomplete="off"
+          style="width:100%; padding:14px 16px; font:inherit; border:1px solid #E7DDD5; border-radius:12px; background:#fff;" />
+
+        <button type="submit" style="margin-top:16px; padding:14px 22px; font:inherit; font-weight:600; border:0; border-radius:12px; background:#171619; color:#fff; cursor:pointer;">
+          Submit to inbox
+        </button>
+      </form>
+
+      <div id="result" style="margin-top:22px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.82rem; line-height:1.7;"></div>
+
+      <h2>What this does</h2>
+      <p>The browser posts the form to <code>/api/orbit-inbox/actions</code>. The worker checks the Orbit session cookie, writes one event to KV, and returns an event id. A consumer running on the agent host polls, writes a markdown file into the vault inbox, then acknowledges the event.</p>
+      <p>Build stamp: <code>{built}</code></p>
+    </article>
+  </div>
+
+  <script is:inline>
+    const form = document.getElementById('orbit-test-form');
+    const result = document.getElementById('result');
+    form?.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const data = new FormData(form);
+      const payload = {
+        checkboxes: {
+          a: data.get('a') === 'on',
+          b: data.get('b') === 'on',
+          c: data.get('c') === 'on',
+        },
+        text: String(data.get('text') || ''),
+      };
+      result.textContent = 'Submitting…';
+      try {
+        const response = await fetch('/api/orbit-inbox/actions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const body = await response.json();
+        if (!response.ok) throw new Error(body.error || 'request failed');
+        result.innerHTML =
+          'Saved. Event id: <strong>' + body.id + '</strong><br>Created: ' + body.createdAt +
+          '<br>No cookie? You would have gotten a 401.';
+        form.reset();
+      } catch (error) {
+        result.textContent = 'Failed: ' + error.message;
+      }
+    });
+  </script>
+</Base>

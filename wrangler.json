@@ -1,0 +1,22 @@
+{
+  "name": "orbit-legacy",
+  "main": "worker/index.js",
+  "compatibility_date": "2026-11-08",
+  "workers_dev": true,
+  "d1_databases": [
+    {
+      "binding": "ORBIT_INBOX_DB",
+      "database_name": "orbit",
+      "database_id": "00000000-0000-0000-0000-000000000000"
+    },
+    {
+      "binding": "ORBIT_OBJECTS_DB",
+      "database_name": "orbit",
+      "database_id": "00000000-0000-0000-0000-000000000000"
+    }
+  ],
+  "vars": {
+    "ORBIT_ARTIFACT_POC_ENABLED": "true",
+    "ORBIT_STORAGE_ARTIFACTS": "objects"
+  }
+}

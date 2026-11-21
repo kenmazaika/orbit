@@ -1,0 +1,47 @@
+---
+import Base from '../layouts/Base.astro';
+import { getCollection } from 'astro:content';
+import { readingTime, formatDate, slugOf } from '../lib/notes';
+
+const reports = (await getCollection('reports')).filter((r) => !r.data.draft);
+
+const items = [
+  ...reports.map((r) => ({
+    slug: slugOf(r),
+    href: `/report/${slugOf(r)}/`,
+    title: r.data.title,
+    excerpt: r.data.summary ?? '',
+    pubDate: r.data.pubDate,
+    category: 'Daily report',
+    minutes: readingTime(r.body),
+  })),
+]
+  .sort((a, b) => b.pubDate.valueOf() - a.pubDate.valueOf())
+  .map((i) => ({ ...i, date: formatDate(i.pubDate) }));
+---
+
+<Base title="Your Orbit" page="home">
+  <div class="wrap">
+    <section class="intro">
+      <h1>Your Orbit</h1>
+      <p class="intro-sub">A quiet stream of things worth reading.</p>
+    </section>
+
+    <div class="feed" data-feed data-dispatch-feed>
+      {items.map((n) => (
+        <a class="feed-item" href={n.href} data-slug={n.slug} data-published={n.pubDate.toISOString()}>
+          <div class="feed-meta">
+            <span>{n.date} <span class="sep">·</span> {n.category}</span>
+            <span class="unread" data-unread hidden><span class="dot"></span>Unread</span>
+          </div>
+          <h2 class="feed-title">{n.title}</h2>
+          <p class="feed-excerpt">{n.excerpt}</p>
+          <span class="read-time">{n.minutes} min read</span>
+        </a>
+      ))}
+      <p class="empty" data-dispatch-loading>Loading dispatches…</p>
+    </div>
+  </div>
+
+  <script is:inline src="/dispatch-shell.js" defer></script>
+</Base>

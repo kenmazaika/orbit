@@ -1,0 +1,28 @@
+---
+import Base from '../layouts/Base.astro';
+---
+
+<Base title="About Orbit" page="plain">
+  <div class="wrap">
+    <section class="intro compact">
+      <h1>About Orbit</h1>
+      <p class="intro-sub">A private reading room, one reader.</p>
+    </section>
+    <article class="plain-prose">
+      <p>Orbit is the private half of the writing setup: drafts, notes, and material that is not ready to be
+        public. The public writing lives at <a href="https://notesfromtheloop.com">notesfromtheloop.com</a>.</p>
+
+      <h2>The door</h2>
+      <p>Access is a single shared password checked at the edge. A correct password sets a signed, HttpOnly
+        cookie valid for 30 days. Changing the password invalidates every existing session automatically,
+        because the cookie signature is derived from it.</p>
+
+      <h2>What is not protected</h2>
+      <p>Treat this as a reading room, not a vault. Anything written here is stored in the build. No secrets,
+        no credentials, no keys.</p>
+
+      <h2>Diagnostics</h2>
+      <p>The gate self-test lives at <a href="/test/">/test/</a>. It is kept deliberately out of the navigation.</p>
+    </article>
+  </div>
+</Base>

@@ -1,0 +1,412 @@
+---
+import Base from '../layouts/Base.astro';
+---
+
+<Base title="Inbox" page="plain">
+  <div class="wrap inbox-wrap">
+    <section class="intro compact">
+      <h1>Inbox</h1>
+      <p class="intro-sub">Messages synchronized from the vault. Choosing an action is not submitting it.</p>
+      <div class="inbox-stat" aria-live="polite">
+        <span class="inbox-stat-num" id="active-count">—</span>
+        <span class="inbox-stat-label">active messages<em id="outbox-count">outbox loading…</em></span>
+      </div>
+    </section>
+
+    <section class="inbox-section" aria-labelledby="active-heading">
+      <div class="inbox-section-head">
+        <h2 id="active-heading">Active</h2>
+        <div class="inbox-controls">
+          <button type="button" class="sort-btn" data-sort="active" data-order="newest" aria-pressed="true">Newest</button>
+          <button type="button" class="sort-btn" data-sort="active" data-order="oldest" aria-pressed="false">Oldest</button>
+        </div>
+      </div>
+      <div id="active-list" class="inbox-list"><p class="inbox-empty">Loading…</p></div>
+    </section>
+
+    <section class="inbox-section" aria-labelledby="progress-heading" id="progress-section" hidden>
+      <div class="inbox-section-head">
+        <h2 id="progress-heading">In progress</h2>
+        <span class="progress-hint">Waiting for the vault</span>
+      </div>
+      <div id="progress-list" class="inbox-list"></div>
+    </section>
+
+    <details class="inbox-section outbox-details" id="outbox-details">
+      <summary class="inbox-section-head outbox-summary">
+        <h2 id="outbox-heading">Outbox <span class="outbox-num" id="outbox-count-inline"></span></h2>
+        <span class="outbox-hint" aria-hidden="true"></span>
+      </summary>
+      <div class="inbox-controls outbox-controls">
+        <button type="button" class="sort-btn" data-sort="outbox" data-order="newest" aria-pressed="true">Newest</button>
+        <button type="button" class="sort-btn" data-sort="outbox" data-order="oldest" aria-pressed="false">Oldest</button>
+        <button type="button" class="sort-btn" data-sort="outbox" data-order="completed" aria-pressed="false">Recently completed</button>
+      </div>
+      <div id="outbox-list" class="inbox-list"><p class="inbox-empty">Loading…</p></div>
+    </details>
+  </div>
+
+  <script is:inline>
+    const state = {
+      cards: { active: [], outbox: [] },
+      sort: { active: 'newest', outbox: 'newest' },
+      drafts: new Map(), // orbit_id -> {actions:Set, instruction:string}
+      busy: new Set(),
+      open: new Set(), // orbit_id of expanded "Read message" panels
+      sig: '',
+      loaded: false,
+    };
+
+    const el = (id) => document.getElementById(id);
+    const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+    function fmt(iso, precision) {
+      if (!iso) return '—';
+      if (precision === 'date' || /^\d{4}-\d{2}-\d{2}$/.test(iso)) {
+        const d = new Date(iso + 'T12:00:00');
+        return d.toLocaleDateString('en-US', { timeZone: 'America/Los_Angeles', month: 'short', day: 'numeric', year: 'numeric' });
+      }
+      const d = new Date(iso);
+      if (Number.isNaN(d.valueOf())) return esc(iso);
+      return d.toLocaleString('en-US', {
+        timeZone: 'America/Los_Angeles', month: 'short', day: 'numeric', year: 'numeric',
+        hour: 'numeric', minute: '2-digit',
+      });
+    }
+
+    function ts(card) {
+      if (!card.created_at) return 0;
+      if (/^\d{4}-\d{2}-\d{2}$/.test(card.created_at)) return new Date(card.created_at + 'T00:00:00-08:00').valueOf();
+      return new Date(card.created_at).valueOf() || 0;
+    }
+
+    function inlineMd(text){
+      return esc(text)
+        .replace(/\[([^\]]+)\]\(\[\[([^\]]+)\]\]\)/g, (m, label, path) => `[[${path}|${label}]]`)
+        .replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (m, path, label) => {
+          const shown = (label || String(path).split('/').pop() || path).trim();
+          return `<span class="wl" title="${esc(path)}">${esc(shown)}</span>`;
+        })
+        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+        .replace(/`([^`]+)`/g, '<code>$1</code>')
+        .replace(/\[([^\]]+)\]\((https?:\/\/|\/)[^)\s]*\)/g, (m, label) => {
+          const href = m.slice(m.indexOf('](') + 2, -1);
+          return `<a href="${href}" target="_blank" rel="noopener">${label}</a>`;
+        })
+        .replace(/https?:\/\/[^\s<]+/g, (url) => {
+          const clean = url.replace(/[.,;:!?]+$/, '');
+          return `<a href="${clean}" target="_blank" rel="noopener">${clean}</a>${url.slice(clean.length)}`;
+        });
+    }
+
+    function mdLite(text){
+      const lines = String(text || '').split(/\r?\n/);
+      let html = '', list = null;
+      const close = () => { if (list) { html += `</${list}>`; list = null; } };
+      for (const raw of lines) {
+        const line = raw.replace(/\s+$/, '');
+        if (!line.trim()) { close(); continue; }
+        if (/^---+$/.test(line.trim())) { close(); html += '<hr>'; continue; }
+        let m;
+        if ((m = line.match(/^#{1,6}\s+(.+)$/))) { close(); html += `<p class="md-h">${inlineMd(m[1])}</p>`; continue; }
+        if ((m = line.match(/^>\s?(.*)$/))) { close(); html += `<blockquote>${inlineMd(m[1])}</blockquote>`; continue; }
+        if ((m = line.match(/^\s*[-*]\s+(.+)$/))) {
+          if (list !== 'ul') { close(); html += '<ul>'; list = 'ul'; }
+          html += `<li>${inlineMd(m[1])}</li>`; continue;
+        }
+        if ((m = line.match(/^\s*\d+\.\s+(.+)$/))) {
+          if (list !== 'ol') { close(); html += '<ol>'; list = 'ol'; }
+          html += `<li>${inlineMd(m[1])}</li>`; continue;
+        }
+        close(); html += `<p>${inlineMd(line)}</p>`;
+      }
+      close(); return html;
+    }
+
+    function statusChip(status) {
+      const map = {
+        pending: ['Pending', 'pending'],
+        submitted: ['Submitted', 'submitted'],
+        processing: ['Processing', 'processing'],
+        blocked: ['Blocked', 'blocked'],
+        completed: ['Completed', 'completed'],
+        outbox: ['Outboxed', 'completed'],
+      };
+      const [label, cls] = map[status] || [status, 'pending'];
+      return `<span class="chip chip-${cls}">${label}</span>`;
+    }
+
+    function draftFor(id) {
+      if (!state.drafts.has(id)) state.drafts.set(id, { actions: new Set(), instruction: '' });
+      return state.drafts.get(id);
+    }
+
+    function renderCard(card, outbox) {
+      const draft = draftFor(card.orbit_id);
+      const actions = Array.isArray(card.actions) ? card.actions : [];
+      const actionable = actions.length > 0 || Boolean(String(card.instruction || '').trim());
+      const body = card.body || '';
+      const summary = card.summary || body.split(/\n/).find((l) => l.trim() && !/^#/.test(l)) || '';
+      const rows = actions.map((a, i) => `
+        <label class="action-row">
+          <input type="checkbox" data-id="${esc(card.orbit_id)}" data-label="${esc(a.label)}"
+            ${draft.actions.has(a.label) ? 'checked' : ''} ${outbox ? 'disabled' : ''} />
+          <span>${esc(a.label)}${a.checked ? ' <em class="already">already applied</em>' : ''}</span>
+        </label>`).join('');
+      const showInstruction = !outbox && (card.instruction || actions.some((a) => /something else|comments|feedback/i.test(a.label)));
+      const short = body.length > 1200 ? body.slice(0, 1200) + '…' : body;
+      const meta = [
+        card.kind ? `<span class="meta-kind">${esc(card.kind)}</span>` : '',
+        `created ${fmt(card.created_at, card.created_precision)}`,
+        card.submitted_at ? `submitted ${fmt(card.submitted_at)}` : '',
+        card.processed_at ? `processed ${fmt(card.processed_at)}` : '',
+        outbox && card.completed_at ? `completed ${fmt(card.completed_at)}` : '',
+      ].filter(Boolean).join(' · ');
+
+      return `
+        <article class="card ${outbox ? 'card-outbox' : ''}" data-orbit-id="${esc(card.orbit_id)}">
+          <header class="card-head">
+            <h3>${esc(card.title)}</h3>
+            <div class="card-meta">${meta}</div>
+            <div class="card-chips">${actionable ? statusChip(card.status) : '<span class="chip chip-fyi">FYI</span>'}${card.instruction ? '<span class="chip chip-slot">feedback slot</span>' : ''}</div>
+          </header>
+          ${body ? `
+          <details class="card-body" data-open-id="${esc(card.orbit_id)}" ${state.open.has(card.orbit_id) ? 'open' : ''}>
+            <summary>
+              <span class="card-summary-inline">${esc(summary)}</span>
+              <span class="collapse-label">Collapse</span>
+            </summary>
+            <div class="card-prose">${mdLite(body)}</div>
+          </details>` : summary ? `<p class="card-summary">${esc(summary)}</p>` : ''}
+          ${actions.length ? `<div class="card-actions">${rows}</div>` : ''}
+          ${showInstruction ? `
+            <label class="instruction-label" for="i-${esc(card.orbit_id)}">Note back to the agent <span>(optional)</span></label>
+            <textarea id="i-${esc(card.orbit_id)}" data-instruction="${esc(card.orbit_id)}" rows="2"
+              placeholder="Anything the checkboxes don't cover…">${esc(draft.instruction)}</textarea>` : ''}
+          ${outbox ? (card.disposition ? `<p class="disposition">${esc(card.disposition)}</p>` : '')
+            : !actionable ? `
+            <div class="card-submit">
+              <button type="button" class="submit-btn ghost" data-dismiss="${esc(card.orbit_id)}">Dismiss</button>
+              <span class="submit-note">FYI — no decision needed.</span>
+            </div>`
+            : card.status === 'processing' ? `<p class="progress-note">Waiting for the vault — applied ${fmt(card.processed_at)}.</p>`
+            : `
+            <div class="card-submit">
+              <button type="button" class="submit-btn" data-submit="${esc(card.orbit_id)}"
+                ${state.busy.has(card.orbit_id) ? 'disabled' : ''}>Submit decision</button>
+              <span class="submit-note" data-note="${esc(card.orbit_id)}">${
+                card.status === 'submitted' ? `Submitted ${fmt(card.submitted_at)} — waiting for the vault.`
+                : card.status === 'processing' ? 'Applied to the vault; the agent is working it.'
+                : card.status === 'blocked' ? 'Blocked — the note changed since you submitted. Review and resubmit.'
+                : ''
+              }</span>
+            </div>`}
+        </article>`;
+    }
+
+    function sorted(list, mode) {
+      const copy = [...list];
+      copy.sort((a, b) => {
+        if (mode === 'completed') {
+          const av = a.completed_at ? new Date(a.completed_at).valueOf() : 0;
+          const bv = b.completed_at ? new Date(b.completed_at).valueOf() : 0;
+          return bv - av || String(a.orbit_id).localeCompare(String(b.orbit_id));
+        }
+        const d = ts(a) - ts(b);
+        return (mode === 'oldest' ? d : -d) || String(a.orbit_id).localeCompare(String(b.orbit_id));
+      });
+      return copy;
+    }
+
+    function render() {
+      const all = sorted(state.cards.active, state.sort.active);
+      const progress = all.filter((c) => c.status === 'processing');
+      const active = all.filter((c) => c.status !== 'processing');
+      const outbox = sorted(state.cards.outbox, state.sort.outbox);
+      el('active-list').innerHTML = active.length ? active.map((c) => renderCard(c, false)).join('') : '<p class="inbox-empty">Nothing active. Good.</p>';
+      el('progress-list').innerHTML = progress.length ? progress.map((c) => renderCard(c, false)).join('') : '';
+      const ps = el('progress-section');
+      if (ps) ps.hidden = progress.length === 0;
+      el('outbox-list').innerHTML = outbox.length ? outbox.map((c) => renderCard(c, true)).join('') : '<p class="inbox-empty">No outbox history yet.</p>';
+      el('active-count').textContent = active.length;
+      el('outbox-count').textContent = `${state.cards.outbox.length} outboxed`;
+      el('outbox-count-inline').textContent = state.cards.outbox.length ? `(${state.cards.outbox.length})` : '';
+      document.querySelectorAll('.sort-btn').forEach((btn) => {
+        const on = state.sort[btn.dataset.sort] === btn.dataset.order;
+        btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+      });
+    }
+
+    async function load() {
+      try {
+        const res = await fetch('/api/v1/inbox', { headers: { Accept: 'application/json' } });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const data = await res.json();
+        const sig = JSON.stringify(data);
+        state.loaded = true;
+        if (sig === state.sig) return;
+        state.sig = sig;
+        const allActive = data.active || [];
+        const completed = allActive.filter((c) => c.status === 'completed');
+        state.cards = {
+          active: allActive.filter((c) => c.status !== 'completed'),
+          outbox: [...completed, ...(data.outbox || [])],
+        };
+        render();
+      } catch (err) {
+        if (!state.loaded) {
+          el('active-list').innerHTML = `<p class="inbox-empty">Could not load inbox: ${esc(err.message)}</p>`;
+          el('outbox-list').innerHTML = '';
+        }
+      }
+    }
+
+    document.addEventListener('toggle', (event) => {
+      const d = event.target;
+      if (!(d instanceof HTMLDetailsElement) || !d.dataset.openId) return;
+      if (d.open) state.open.add(d.dataset.openId); else state.open.delete(d.dataset.openId);
+    }, true);
+
+    document.addEventListener('change', (event) => {
+      const cb = event.target.closest('input[type="checkbox"][data-label]');
+      if (cb) {
+        const draft = draftFor(cb.dataset.id);
+        if (cb.checked) draft.actions.add(cb.dataset.label); else draft.actions.delete(cb.dataset.label);
+        return;
+      }
+    });
+
+    document.addEventListener('input', (event) => {
+      const ta = event.target.closest('textarea[data-instruction]');
+      if (ta) draftFor(ta.dataset.instruction).instruction = ta.value;
+    });
+
+    document.addEventListener('click', async (event) => {
+      const sortBtn = event.target.closest('.sort-btn');
+      if (sortBtn) {
+        state.sort[sortBtn.dataset.sort] = sortBtn.dataset.order;
+        render();
+        return;
+      }
+      const dismiss = event.target.closest('[data-dismiss]');
+      if (dismiss) {
+        const id = dismiss.dataset.dismiss;
+        dismiss.disabled = true;
+        try {
+          const res = await fetch(`/api/v1/inbox/${encodeURIComponent(id)}/dismiss`, { method: 'POST' });
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          state.cards.active = state.cards.active.filter((c) => c.orbit_id !== id);
+          render();
+        } catch (err) { dismiss.disabled = false; }
+        return;
+      }
+      const submit = event.target.closest('[data-submit]');
+      if (!submit) return;
+      const id = submit.dataset.submit;
+      const draft = draftFor(id);
+      const note = document.querySelector(`[data-note="${CSS.escape(id)}"]`);
+      submit.disabled = true;
+      state.busy.add(id);
+      if (note) note.textContent = 'Submitting…';
+      try {
+        const res = await fetch(`/api/v1/inbox/${encodeURIComponent(id)}/submit`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            choices: [...draft.actions], instruction: draft.instruction,
+            idempotencyKey: `inbox-ui-${id}`,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
+        draft.actions.clear();
+        draft.instruction = '';
+        if (note) note.textContent = `Submitted ${new Date(data.submittedAt).toLocaleTimeString('en-US', { timeZone: 'America/Los_Angeles' })} — waiting for the vault.`;
+      } catch (err) {
+        if (note) note.textContent = 'Failed: ' + err.message;
+      } finally {
+        submit.disabled = false;
+        state.busy.delete(id);
+      }
+    });
+
+    load();
+    setInterval(() => { if (document.visibilityState === 'visible') load(); }, 2000);
+  </script>
+
+  <style is:inline>
+    .inbox-wrap { max-width: 780px; }
+    .inbox-stat { display: flex; align-items: center; gap: 14px; margin: 18px 0 2px; }
+    .inbox-stat-num { font-family: var(--serif); font-size: 3.4rem; line-height: .95; letter-spacing: -.04em; color: var(--text); }
+    .inbox-stat-label { display: flex; flex-direction: column; gap: 4px; font-family: var(--mono); font-size: .62rem; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+    .inbox-stat-label em { font-style: normal; font-size: .56rem; letter-spacing: .1em; opacity: .8; }
+    .outbox-details { padding-top: 24px; }
+    .outbox-summary { cursor: pointer; list-style: none; margin-bottom: 0; }
+    .outbox-summary::-webkit-details-marker { display: none; }
+    .outbox-summary h2 { font-size: 1.2rem; color: var(--muted); }
+    .outbox-num { font-family: var(--mono); font-size: .62rem; font-weight: 400; letter-spacing: .08em; color: var(--muted); }
+    .outbox-hint::after { content: "Show"; font-family: var(--mono); font-size: .58rem; letter-spacing: .12em; text-transform: uppercase; color: var(--purple); }
+    .outbox-details[open] .outbox-hint::after { content: "Hide"; }
+    .outbox-controls { margin: 10px 0 14px; }
+    .progress-hint { font-family: var(--mono); font-size: .58rem; letter-spacing: .12em; text-transform: uppercase; color: var(--purple); }
+    .progress-note { margin-top: 12px; font-family: var(--mono); font-size: .62rem; letter-spacing: .06em; color: var(--muted); }
+    .inbox-section { padding-top: 28px; }
+    .inbox-section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--rule); padding-bottom: 8px; margin-bottom: 14px; }
+    .inbox-section-head h2 { font-family: var(--serif); font-size: 1.45rem; margin: 0; letter-spacing: -.02em; }
+    .inbox-controls { display: flex; gap: 4px; flex-wrap: wrap; }
+    .sort-btn { all: unset; cursor: pointer; font-family: var(--mono); font-size: .58rem; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); padding: 5px 8px; border-radius: 999px; border: 1px solid transparent; }
+    .sort-btn[aria-pressed="true"] { color: var(--purple); border-color: var(--purple-line); background: var(--purple-soft); }
+    .inbox-list { display: flex; flex-direction: column; gap: 14px; }
+    .inbox-empty { color: var(--muted); font-size: .92rem; padding: 10px 0 4px; }
+    .card { border: 1px solid var(--rule); border-radius: 14px; background: #fff; padding: 18px 18px 16px; }
+    .card-outbox { background: #FBF8F5; }
+    .card-head h3 { font-family: var(--serif); font-size: 1.16rem; line-height: 1.28; margin: 0 0 6px; letter-spacing: -.015em; }
+    .card-meta { font-family: var(--mono); font-size: .62rem; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+    .card-chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 9px; }
+    .chip { font-family: var(--mono); font-size: .56rem; letter-spacing: .12em; text-transform: uppercase; padding: 4px 8px; border-radius: 999px; border: 1px solid var(--rule); color: var(--muted); }
+    .chip-pending { color: #7A5B12; border-color: #E8D9B5; background: #FDF6E7; }
+    .chip-submitted { color: var(--purple); border-color: var(--purple-line); background: var(--purple-soft); }
+    .chip-processing { color: var(--mint-ink); border-color: #B9E6D7; background: var(--mint-bg); }
+    .chip-blocked { color: #8A2C2C; border-color: #EBC6C6; background: #FBEEEE; }
+    .chip-completed { color: #3F4A44; border-color: var(--rule); background: #F4F1ED; }
+    .chip-slot { border-style: dashed; }
+    .card-summary { margin: 4px 0 8px; font-size: .92rem; line-height: 1.5; color: var(--text-2); }
+    .card-summary-inline { display: block; font-family: var(--sans); font-size: .92rem; line-height: 1.5;
+      letter-spacing: 0; text-transform: none; color: var(--text-2); font-weight: 400; }
+    .collapse-label { display: none; font-family: var(--mono); font-size: .62rem; letter-spacing: .1em;
+      text-transform: uppercase; color: var(--purple); }
+    .card-body summary { list-style: none; }
+    .card-body summary::-webkit-details-marker { display: none; }
+    .card-body summary::after { content: ' ▾'; color: var(--purple); }
+    .card-body[open] summary::after { content: ''; }
+    .card-body[open] .card-summary-inline { display: none; }
+    .card-body[open] .collapse-label { display: inline; }
+    .chip-fyi { color: #3f4a44; border-color: var(--rule); background: #f4f1ed; }
+    .submit-btn.ghost { background: #fff; color: var(--text); border: 1px solid var(--rule); }
+    .wl { border-bottom: 1px dotted var(--purple-line); color: var(--purple); }
+    .card-prose p { margin: 0 0 8px; }
+    .card-prose ul, .card-prose ol { margin: 4px 0 8px 18px; padding: 0; }
+    .card-prose li { margin: 2px 0; }
+    .card-prose blockquote { margin: 6px 0; padding: 4px 10px; border-left: 2px solid var(--purple-line); color: var(--muted); }
+    .card-prose hr { border: 0; border-top: 1px solid var(--rule); margin: 10px 0; }
+    .card-prose .md-h { font-weight: 600; margin: 10px 0 4px; }
+    .card-body { margin-top: 12px; }
+    .card-body summary { cursor: pointer; font-family: var(--mono); font-size: .62rem; letter-spacing: .1em; text-transform: uppercase; color: var(--purple); }
+    .card-prose { margin-top: 10px; font-size: .93rem; line-height: 1.58; color: var(--text-2); white-space: pre-wrap; }
+    .card-prose code { font-family: var(--mono); font-size: .85em; background: #F2EEEA; border-radius: 4px; padding: .06em .3em; }
+    .card-actions { margin-top: 14px; display: flex; flex-direction: column; gap: 2px; }
+    .action-row { display: flex; gap: 10px; align-items: flex-start; padding: 9px 4px; border-top: 1px solid var(--rule-soft); font-size: .93rem; cursor: pointer; }
+    .action-row input { margin-top: 3px; accent-color: var(--purple); }
+    .already { color: var(--muted); font-size: .78em; font-style: normal; }
+    .instruction-label { display: block; margin: 14px 0 6px; font-family: var(--mono); font-size: .6rem; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+    .instruction-label span { text-transform: none; letter-spacing: 0; }
+    textarea { width: 100%; resize: vertical; font: inherit; font-size: .93rem; padding: 10px 12px; border: 1px solid var(--rule); border-radius: 10px; background: #fff; color: var(--text); }
+    textarea:focus { outline: none; border-color: var(--purple-line); box-shadow: 0 0 0 3px var(--purple-soft); }
+    .card-submit { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 14px; }
+    .submit-btn { font: inherit; font-size: .86rem; font-weight: 600; padding: 10px 16px; border: 0; border-radius: 10px; background: var(--text); color: #fff; cursor: pointer; }
+    .submit-btn:disabled { opacity: .55; cursor: default; }
+    .submit-note { font-size: .76rem; color: var(--muted); }
+    .disposition { margin: 12px 0 0; font-size: .84rem; color: var(--muted); font-style: italic; }
+    @media (min-width: 760px) { .inbox-section-head { position: sticky; top: 0; background: var(--bg); z-index: 2; } }
+  </style>
+</Base>

@@ -1,0 +1,35 @@
+---
+import Base from '../layouts/Base.astro';
+import { getCollection } from 'astro:content';
+import { sortedNotes, readingTime, formatDate, slugOf } from '../lib/notes';
+
+const notes = await sortedNotes(await getCollection('notes'));
+const byYear = new Map();
+for (const n of notes) {
+  const y = n.data.pubDate.getUTCFullYear();
+  if (!byYear.has(y)) byYear.set(y, []);
+  byYear.get(y).push(n);
+}
+---
+
+<Base title="Archive" page="archive">
+  <div class="wrap">
+    <section class="intro compact">
+      <h1>Archive</h1>
+      <p class="intro-sub">Everything in Orbit, newest first.</p>
+    </section>
+
+    {[...byYear.entries()].map(([year, list]) => (
+      <section class="archive-year">
+        <h2 class="year">{year}</h2>
+        {list.map((n) => (
+          <a class="archive-item" href={`/notes/${slugOf(n)}/`}>
+            <span class="archive-date">{formatDate(n.data.pubDate)}</span>
+            <span class="archive-title">{n.data.title}</span>
+            <span class="archive-time">{readingTime(n.body)} min</span>
+          </a>
+        ))}
+      </section>
+    ))}
+  </div>
+</Base>

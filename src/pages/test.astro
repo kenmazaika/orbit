@@ -1,0 +1,35 @@
+---
+import Base from '../layouts/Base.astro';
+const built = new Date().toISOString();
+---
+
+<Base title="Gate test" page="plain">
+  <div class="wrap">
+    <section class="intro compact">
+      <h1>Gate test</h1>
+      <p class="intro-sub">If you can read this, the password gate let you through.</p>
+    </section>
+
+    <div class="checklist">
+      <div class="check"><span class="mark">1</span><div><strong>Gate is active</strong><span>You reached this page with a valid session cookie.</span></div></div>
+      <div class="check"><span class="mark">2</span><div><strong>Assets are live</strong><span>This Astro page rendered and its stylesheet loaded.</span></div></div>
+      <div class="check"><span class="mark">3</span><div><strong>No indexing</strong><span>Every page carries <code>noindex, nofollow</code>.</span></div></div>
+    </div>
+
+    <article class="plain-prose">
+      <h2>Build stamp</h2>
+      <p><code id="built">{built}</code></p>
+      <h2>Session</h2>
+      <p>Cookie visible to JS: <code id="cookie">checking…</code><br />Local clock: <code id="clock">checking…</code></p>
+      <p>Use <strong>Lock</strong> in the navigation, then reload this URL. You should land on the password screen.</p>
+    </article>
+  </div>
+
+  <script is:inline>
+    const hasCookie = document.cookie.split(';').some((c) => c.trim().startsWith('orbit_session='));
+    const el = document.getElementById('cookie');
+    if (el) el.textContent = hasCookie ? 'yes' : 'not visible to JS (HttpOnly)';
+    const clock = document.getElementById('clock');
+    if (clock) clock.textContent = new Date().toLocaleString();
+  </script>
+</Base>

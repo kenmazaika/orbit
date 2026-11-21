@@ -124,3 +124,5 @@ export function json(value, fallback = {}) {
     return fallback;
   }
 }
+
+// shared upstream sync probe 2026-11-21

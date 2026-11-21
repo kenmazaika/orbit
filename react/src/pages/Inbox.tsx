@@ -2,6 +2,7 @@ import React from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, InboxItem } from '../api';
 import { startWorkFromSource } from './Work';
+import { sanitizeHtml } from '../lib';
 import { useNavigate } from 'react-router-dom';
 
 /* Ported 1:1 from src/pages/inbox.astro — same markup, same mdLite renderer,
